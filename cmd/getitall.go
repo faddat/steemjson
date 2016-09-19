@@ -52,7 +52,7 @@ func init() {
 	}
 
 	// Create a table in the DB
-	var rethinkdbname string = "steemit75"
+	var rethinkdbname string = "steem"
 	_, err = r.DBCreate(rethinkdbname).RunWrite(Rsession)
 	Rsession.Use(rethinkdbname)
 	if err != nil {
@@ -65,13 +65,7 @@ func init() {
 
 	}
 
-	_, err = r.DB(rethinkdbname).TableCreate("flatblocks").RunWrite(Rsession)
-	if err != nil {
-		fmt.Println("Probably already made a table for flat blocks")
-
-	}
-
-	_, err = r.DB(rethinkdbname).TableCreate("operations").RunWrite(Rsession)
+	_, err = r.DB(rethinkdbname).TableCreate("blocks").RunWrite(Rsession)
 	if err != nil {
 		fmt.Println("Probably already made a table for flat blocks")
 
