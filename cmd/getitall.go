@@ -15,20 +15,17 @@
 package cmd
 
 import (
-	"database/sql"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
-	"sort"
 	"syscall"
 	"time"
 
-	"github.com/astaxie/flatmap"
 	r "github.com/dancannon/gorethink"
 	"github.com/go-steem/rpc"
+	d "github.com/go-steem/rpc/apis/database"
 	"github.com/go-steem/rpc/transports/websocket"
 	_ "github.com/herenow/go-crate"
 	"github.com/spf13/cobra"
@@ -44,6 +41,7 @@ var getitallCmd = &cobra.Command{
 }
 
 func init() {
+
 	RootCmd.AddCommand(getitallCmd)
 
 	Rsession, err := r.Connect(r.ConnectOpts{
@@ -52,8 +50,6 @@ func init() {
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
-
-	db, err := sql.Open("crate", "http://192.168.194.91:4200/")
 
 	// Create a table in the DB
 	var rethinkdbname string = "steemit75"
@@ -104,8 +100,6 @@ func init() {
 	}()
 	// This allows you to tell the app which block to start on.
 	// TODO: Make all of the vars into a config file and package the binaries
-	Startblock := 1
-	U := uint32(Startblock)
 	// Start the connection monitor.
 	monitorChan := make(chan interface{}, 1)
 	if reconnect {
@@ -127,11 +121,11 @@ func init() {
 		websocket.SetMonitor(monitorChan))
 
 	// Use the transport to get an RPC client.
-	client, err := rpc.NewClient(t)
+	Client, err := rpc.NewClient(t)
 
 	defer func() {
 		if !interrupted {
-			client.Close()
+			Client.Close()
 		}
 	}()
 
@@ -142,63 +136,21 @@ func init() {
 		log.Println("Signal received, exiting...")
 		signal.Stop(signalCh)
 		interrupted = true
-		client.Close()
+		Client.Close()
 	}()
 
 	// Keep processing incoming blocks forever.
 	fmt.Println("---> Entering the block processing loop")
 	for {
 		// Get current properties.
-		props, err := client.Database.GetDynamicGlobalProperties()
+		props, err := Client.Database.GetDynamicGlobalProperties()
+		if err != nil {
+			fmt.Println(err)
+		}
 
-		// Process new blocks.
-		// This now explodes the JSON for each block.  This will flatten the nested arrays in the JSON.  Unsure if this will yeild the right result but it will be better.
-		for props.LastIrreversibleBlockNum-U > 0 {
-			block, err := client.Database.GetBlock(U)
-			blockraw, err := client.Database.GetBlockRaw(U)
-			lastblock := props.LastIrreversibleBlockNum
-			var data = blockraw
-			var mp map[string]interface{}
-			if err := json.Unmarshal([]byte(*data), &mp); err != nil {
-				log.Fatal(err)
-			}
-			fm, err := flatmap.Flatten(mp)
-			if err != nil {
-				log.Fatal(err)
-			}
-			var ks []string
-			for k := range fm {
-				ks = append(ks, k)
-			}
-			sort.Strings(ks)
-			for _, k := range ks {
-				fmt.Println(k, ":", fm[k])
-			}
-			fmt.Println(U)
-			//rethinkdb writes
-			r.Table("transactions").
-				Insert(block.Transactions).
-				Exec(Rsession)
-			r.Table("flatblocks").
-				Insert(fm).
-				Exec(Rsession)
-			r.Table("nestedblocks").
-				Insert(blockraw).
-				Exec(Rsession)
-			r.Table("blocks").
-				Insert(block).
-				Exec(Rsession)
-			//crate.io writes
-			db.Exec("create table transactions")
-			db.Exec("insert into trasactions", block.Transactions)
-			// Iterator:  This should work for doing a full dump, and then waiting 3 seconds each time.  We shall see.
-			if U != lastblock {
-				U++
-			}
-			if err != nil {
-				fmt.Println(err)
-			}
-
+		// Process blocks.
+		for I := uint32(1); I <= props.LastIrreversibleBlockNum; I++ {
+			go getblock(I, Client, Rsession)
 		}
 		if err != nil {
 			fmt.Println(err)
@@ -206,4 +158,23 @@ func init() {
 
 	}
 
+}
+
+func getblock(I uint32, Client *rpc.Client, Rsession *r.Session) {
+	block, err := Client.Database.GetBlock(I)
+	fmt.Println(I)
+	writeBlock(block, Rsession)
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+
+func writeBlock(block *d.Block, Rsession *r.Session) {
+	//rethinkdb writes
+	r.Table("transactions").
+		Insert(block.Transactions).
+		Exec(Rsession)
+	r.Table("blocks").
+		Insert(block).
+		Exec(Rsession)
 }
