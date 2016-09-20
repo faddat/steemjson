@@ -24,9 +24,9 @@ import (
 	"time"
 
 	r "github.com/dancannon/gorethink"
-	"github.com/go-steem/rpc"
-	d "github.com/go-steem/rpc/apis/database"
-	"github.com/go-steem/rpc/transports/websocket"
+	"github.com/faddat/rpc"
+	d "github.com/faddat/rpc/apis/database"
+	"github.com/faddat/rpc/transports/websocket"
 	_ "github.com/herenow/go-crate"
 	"github.com/spf13/cobra"
 )
