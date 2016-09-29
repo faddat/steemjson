@@ -1,4 +1,4 @@
-package websocket
+package steemrpc
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 	"github.com/go-steem/rpc/transports/websocket"
 )
 
-func WebSocket(url string, reconnect bool, err error) (Client *rpc.Client) {
+func SteemSocket(url string, reconnect bool, err error) (Client *rpc.Client) {
 
 	// Start catching signals.
 	var interrupted bool
@@ -48,11 +48,11 @@ func WebSocket(url string, reconnect bool, err error) (Client *rpc.Client) {
 		websocket.SetMonitor(monitorChan))
 
 	// Use the transport to get an RPC client.
-	client, err := rpc.NewClient(t)
+	Client, err = rpc.NewClient(t)
 
 	defer func() {
 		if !interrupted {
-			client.Close()
+			Client.Close()
 		}
 	}()
 
@@ -62,8 +62,7 @@ func WebSocket(url string, reconnect bool, err error) (Client *rpc.Client) {
 		log.Println("Signal received, exiting...")
 		signal.Stop(signalCh)
 		interrupted = true
-		client.Close()
+		Client.Close()
 	}()
-	return client
-
+	return Client
 }

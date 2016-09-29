@@ -90,8 +90,10 @@ var getitallCmd = &cobra.Command{
 }
 
 func init() {
-	//below is a slice of strings containing rethinkdb server addresses
-	RethinkAddresses := []string{"138.201.198.167:28015", "138.201.198.169:28015", "138.201.198.173:28015"}
+	var err error
+	//Adds getitall to cobra command list
+	RootCmd.AddCommand(getitallCmd)
+	//vars for the strange as hell flag parse-thing going on here for the overall strange as hell websocket situation
 	//No idea why this i sset up the way it is, but the middle variable is a steemd server address
 	flagAddress := flag.String("rpc_endpoint", "ws://138.201.198.167:8090", "steemd RPC endpoint address")
 	//I haven't played with the reconect setting because I hven't had disconnect issues
@@ -101,39 +103,34 @@ func init() {
 		url       = *flagAddress
 		reconnect = *flagReconnect
 	)
-	//Adds getitall to cobra command list
-	RootCmd.AddCommand(getitallCmd)
 	//gets the websockets over http client
-	WebSocket(url, reconnect, err)(Client, err)
+	//below is a slice of strings containing rethinkdb server addresses
+	RethinkAddresses := []string{"138.201.198.167:28015", "138.201.198.169:28015", "138.201.198.173:28015"}
+	Rsession := rethinkconnect.RethinkConnect(RethinkAddresses)
+	Client := steemrpc.SteemSocket(url, reconnect, err)
 	//connects us to rethinkdb
-	RethinkConnect(RethinkAddresses)(Rsession, err)
+	fmt.Println("all finished time to start processing blocks!")
+
 	//Infinitely loops at the getblock function.  Once the iterator reaches the last irreversible block number introduce one second pauses.
 	I := uint32(1)
-	
+	props, _ := Client.Database.GetDynamicGlobalProperties()
 	for {
-		if {
-			props, _ := client.Database.GetDynamicGlobalProperties()
-			I <= props.LastIrreversibleBlockNum-lastBlock
-			go getblock(I, Client, Rsession)
+		block, err := Client.Database.GetBlockRaw(I)
+		var knockers BlockStruct
+		json.Unmarshal(*block, knockers)
+		knockers.Result.BlockID = I
+		fmt.Println(I)
+		fmt.Println(&knockers)
+		writeBlock(knockers, Rsession)
+		if err != nil {
+			fmt.Println(err)
+		}
+		if I < props.LastIrreversibleBlockNum {
 			I++
 		} else {
-		time.Sleep(time.Second(1))
-	}
+			time.Sleep(3000 * time.Millisecond)
+		}
 
-}
-}
-
-//Accepts an iterator, the websockets over http rpc client and the rethinkdb session from init
-func getblock(I uint32, Client *rpc.Client, Rsession *r.Session) {
-	block, err := Client.Database.GetBlockRaw(I)
-	var knockers BlockStruct
-	json.Unmarshal(*block, &knockers)
-	knockers.Result.BlockID = I
-	fmt.Println(I)
-	fmt.Println(&knockers)
-	go writeBlock(knockers, Rsession)
-	if err != nil {
-		fmt.Println(err)
 	}
 }
 

@@ -1,4 +1,4 @@
-package rethinkdb
+package rethinkconnect
 
 import (
 	"fmt"
@@ -8,7 +8,8 @@ import (
 )
 
 func RethinkConnect(RethinkAddresses []string) (Rsession *r.Session) {
-	Rsession, err := r.Connect(r.ConnectOpts{
+	var err error
+	Rsession, err = r.Connect(r.ConnectOpts{
 		Addresses: RethinkAddresses,
 	})
 	if err != nil {
@@ -37,5 +38,5 @@ func RethinkConnect(RethinkAddresses []string) (Rsession *r.Session) {
 	if err != nil {
 		fmt.Println("Probably already made a table for flat blocks")
 	}
-	return Rsession, err
+	return Rsession
 }
