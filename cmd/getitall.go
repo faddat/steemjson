@@ -15,160 +15,108 @@
 package cmd
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+
+	"github.com/faddat/steemjson/lib/rethinkdb"
+	"github.com/faddat/steemjson/lib/websocket"
 
 	r "github.com/dancannon/gorethink"
-	"github.com/faddat/rpc"
-	d "github.com/faddat/rpc/apis/database"
-	"github.com/faddat/rpc/transports/websocket"
-	_ "github.com/herenow/go-crate"
+	"github.com/go-steem/rpc"
+
 	"github.com/spf13/cobra"
 )
+
+//My alpha of what a full freakin block is like.  OMFG, the generator, dudes.... Swagger or gRPC.....
+type BlockStruct struct {
+	Result struct {
+		BlockID               uint32
+		Previous              string        `json:"previous,omitifempty"`
+		Timestamp             string        `json:"timestamp,omitifempty"`
+		Witness               string        `json:"witness,omitifempty"`
+		TransactionMerkleRoot string        `json:"transaction_merkle_root,omitifempty"`
+		Extensions            []interface{} `json:"extensions,omitifempty"`
+		WitnessSignature      string        `json:"witness_signature,omitifempty"`
+		Transactions          struct {
+			Operations struct {
+				OpType          string   `json:"operations.0,omitifempty"`
+				Author          string   `json:"weenis,omitifempty"`
+				Body            string   `json:"body,omitifempty"`
+				PermLink        string   `json:"permlink,omitifempty"`
+				Voter           string   `json:"voter,omitifempty"`
+				Weight          string   `json:"weight,omitifempty"`
+				JsonMetadata    string   `json:"json_metadata,omitifempty"`
+				ParentAuthor    string   `json:"parent_author,omitifempty"`
+				Permlink        string   `json:"permlink,omitifempty"`
+				Title           string   `json:"title,omitifempty"`
+				Owner           string   `json:"owner,omitifempty"`
+				OpUrl           string   `json:"url,omitifempty"`
+				BlockSigningKey string   `json:"block_signing_key,omitifempty"`
+				KeyAuths        []string `json:"key_auths,omitifempty"`
+				MemoKey         string   `json:"memo_key,omitifempty"`
+				Fee             string   `json:"fee,omitifempty"`
+				NewAccountName  string   `json:"new_account_name,omitifempty"`
+				AccountAuths    []string `json:"account_auths,omitifempty"`
+				WeightThreshold int      `json:"weight_threshold,omitifempty"`
+				WorkerAccount   string   `json:"worker_account,omitifempty"`
+				AccountUpdate   string   `json:"account_update,omitifempty"`
+				Work            struct {
+					Signature string `json:"signature,omitifempty"`
+					Input     string `json:"input,omitifempty"`
+					WorkWork  string `json:"work.work,omitifempty"`
+					Worker    string `json:"worker,omitifempty"`
+				} `json:"work,omitifempty"`
+				OperationProps struct {
+					AccountCreationFee string `json:"account_creation_fee,omitifempty"`
+					MaximumBlockSize   uint32 `json:"maximum_block_size,omitifempty"`
+					SbdInterestRate    uint16 `json:"sbd_interest_rate,omitifempty"`
+				} `json:"props,omitifempty"`
+			}
+			Signatures []string `json:"signatures,omitifempty"`
+		}
+		SigningKey string `json:"signing_key,omitifempty"`
+	}
+}
 
 var getitallCmd = &cobra.Command{
 	Use:   "getitall",
 	Short: "This will get the whole blockchain and write it to rethinkdb",
 	Long:  `cooter!`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Hugo Static Site Generator v0.9 -- HEAD")
+		fmt.Println("get it all")
 	},
 }
 
 func init() {
+	//below is a slice of strings containing rethinkdb server addresses
+	RethinkAddresses := []string{"138.201.198.167:28015", "138.201.198.169:28015", "138.201.198.173:28015"}
+	//No idea why this i sset up the way it is, but the middle variable is a steemd server address
+	flagAddress := flag.String("rpc_endpoint", "ws://138.201.198.167:8090", "steemd RPC endpoint address")
+	//I haven't played with the reconect setting because I hven't had disconnect issues
+	flagReconnect := flag.Bool("reconnect", false, "enable auto-reconnect mode")
 
 	RootCmd.AddCommand(getitallCmd)
-
-	Rsession, err := r.Connect(r.ConnectOpts{
-		Addresses: []string{"138.201.198.167:28015", "138.201.198.169:28015", "138.201.198.173:28015", "138.201.198.175:28015"},
-	})
-	if err != nil {
-		log.Fatalln(err.Error())
-	}
-
-	// Create a table in the DB
-	var rethinkdbname string = "steem"
-	_, err = r.DBCreate(rethinkdbname).RunWrite(Rsession)
-	Rsession.Use(rethinkdbname)
-	if err != nil {
-		fmt.Println("rethindb DB already made")
-	}
-
-	_, err = r.DB(rethinkdbname).TableCreate("transactions").RunWrite(Rsession)
-	if err != nil {
-		fmt.Println("Probably already made a table for transactions")
-
-	}
-
-	_, err = r.DB(rethinkdbname).TableCreate("blocks").RunWrite(Rsession)
-	if err != nil {
-		fmt.Println("Probably already made a table for flat blocks")
-
-	}
-
-	// Process flags.
-	flagAddress := flag.String("rpc_endpoint", "ws://138.201.198.169:8090", "steemd RPC endpoint address")
-	flagReconnect := flag.Bool("reconnect", false, "enable auto-reconnect mode")
-	flag.Parse()
-
-	var (
-		url       = *flagAddress
-		reconnect = *flagReconnect
-	)
-
-	// Start catching signals.
-	var interrupted bool
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
-
-	// Drop the error in case it is a request being interrupted.
-	defer func() {
-		if err == websocket.ErrClosing && interrupted {
-			err = nil
-		}
-	}()
-	// This allows you to tell the app which block to start on.
-	// TODO: Make all of the vars into a config file and package the binaries
-	// Start the connection monitor.
-	monitorChan := make(chan interface{}, 1)
-	if reconnect {
-		go func() {
-			for {
-				event, ok := <-monitorChan
-				if ok {
-					log.Println(event)
-				}
-			}
-		}()
-	}
-
-	// Instantiate the WebSocket transport.
-	log.Printf("---> Dial(\"%v\")\n", url)
-	t, err := websocket.NewTransport(url,
-		websocket.SetAutoReconnectEnabled(reconnect),
-		websocket.SetAutoReconnectMaxDelay(30*time.Second),
-		websocket.SetMonitor(monitorChan))
-
-	// Use the transport to get an RPC client.
-	Client, err := rpc.NewClient(t)
-
-	defer func() {
-		if !interrupted {
-			Client.Close()
-		}
-	}()
-
-	// Start processing signals.
-	go func() {
-		<-signalCh
-		fmt.Println()
-		log.Println("Signal received, exiting...")
-		signal.Stop(signalCh)
-		interrupted = true
-		Client.Close()
-	}()
-
-	// Keep processing incoming blocks forever.
-	fmt.Println("---> Entering the block processing loop")
-	for {
-		// Get current properties.
-		props, err := Client.Database.GetDynamicGlobalProperties()
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		// Process blocks.
-		for I := uint32(1); I <= props.LastIrreversibleBlockNum; I++ {
-			go getblock(I, Client, Rsession)
-		}
-		if err != nil {
-			fmt.Println(err)
-		}
-
-	}
-
+	WebSocket(flagAddress, flagReconnect)(Client)
+	RethinkConnect(RethinkAddresses)(Rsession)
 }
 
 func getblock(I uint32, Client *rpc.Client, Rsession *r.Session) {
-	block, err := Client.Database.GetBlock(I)
+	block, err := Client.Database.GetBlockRaw(I)
+	var knockers BlockStruct
+	json.Unmarshal(*block, &knockers)
+	knockers.Result.BlockID = I
 	fmt.Println(I)
-	writeBlock(block, Rsession)
+	fmt.Println(&knockers)
+	writeBlock(knockers, Rsession)
 	if err != nil {
 		fmt.Println(err)
 	}
 }
 
-func writeBlock(block *d.Block, Rsession *r.Session) {
+func writeBlock(knockers BlockStruct, Rsession *r.Session) {
 	//rethinkdb writes
-	r.Table("transactions").
-		Insert(block.Transactions).
-		Exec(Rsession)
 	r.Table("blocks").
-		Insert(block).
+		Insert(knockers).
 		Exec(Rsession)
 }
