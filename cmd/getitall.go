@@ -18,9 +18,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"time"
 
-	"github.com/faddat/steemjson/lib/rethinkdb"
-	"github.com/faddat/steemjson/lib/websocket"
+	"github.com/faddat/steemjson/cmd/lib/rethinkdb"
+	"github.com/faddat/steemjson/cmd/lib/websocket"
 
 	r "github.com/dancannon/gorethink"
 	"github.com/go-steem/rpc"
@@ -95,12 +96,34 @@ func init() {
 	flagAddress := flag.String("rpc_endpoint", "ws://138.201.198.167:8090", "steemd RPC endpoint address")
 	//I haven't played with the reconect setting because I hven't had disconnect issues
 	flagReconnect := flag.Bool("reconnect", false, "enable auto-reconnect mode")
-
+	flag.Parse()
+	var (
+		url       = *flagAddress
+		reconnect = *flagReconnect
+	)
+	//Adds getitall to cobra command list
 	RootCmd.AddCommand(getitallCmd)
-	WebSocket(flagAddress, flagReconnect)(Client)
-	RethinkConnect(RethinkAddresses)(Rsession)
+	//gets the websockets over http client
+	WebSocket(url, reconnect, err)(Client, err)
+	//connects us to rethinkdb
+	RethinkConnect(RethinkAddresses)(Rsession, err)
+	//Infinitely loops at the getblock function.  Once the iterator reaches the last irreversible block number introduce one second pauses.
+	I := uint32(1)
+	
+	for {
+		if {
+			props, _ := client.Database.GetDynamicGlobalProperties()
+			I <= props.LastIrreversibleBlockNum-lastBlock
+			go getblock(I, Client, Rsession)
+			I++
+		} else {
+		time.Sleep(time.Second(1))
+	}
+
+}
 }
 
+//Accepts an iterator, the websockets over http rpc client and the rethinkdb session from init
 func getblock(I uint32, Client *rpc.Client, Rsession *r.Session) {
 	block, err := Client.Database.GetBlockRaw(I)
 	var knockers BlockStruct
@@ -108,12 +131,13 @@ func getblock(I uint32, Client *rpc.Client, Rsession *r.Session) {
 	knockers.Result.BlockID = I
 	fmt.Println(I)
 	fmt.Println(&knockers)
-	writeBlock(knockers, Rsession)
+	go writeBlock(knockers, Rsession)
 	if err != nil {
 		fmt.Println(err)
 	}
 }
 
+//Accepts the block structure, and writes that to rethinkdb.
 func writeBlock(knockers BlockStruct, Rsession *r.Session) {
 	//rethinkdb writes
 	r.Table("blocks").
